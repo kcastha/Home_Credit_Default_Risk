@@ -1,0 +1,681 @@
+---
+title: "Modelling_Assignment"
+author: "Astha K C, Max R, Jordan S"
+date: "2025-10-26"
+output: html_document
+---
+
+# Introduction
+## A clear statement of the business and analytic problems for the project
+Home Credit is an international consumer finance provider with operations in multiple European and Asian countries. We focus on responsible lending primarily to people with little or no credit history.” (via Home Credit’s ‘About Us’ webpage). Based on this information, we can conclude that Home Credit is facing a challenge in accurately predicting which clients will repay their loans. This challenge is particularly hard for Home Credit, as its main clients are those with limited history. Credit history is a significant source of predictive power for loan officers, so without access to it, Home Credit is at a disadvantage in accurately forecasting who will repay their loan. The company has made great strides in being able to predict if a potential client will default on their loan by using various statistical and machine learning methods to make these predictions. However, it remains the main risk to Home Credit’s profitability, as if loans are consistently issued to clients who default on them, the company’s revenues will decrease. Therefore, the purpose of this project will be to enhance Home Credit’s ability to predict loan default.
+
+##  Analytic problem
+The goal of this project is to grow the revenue of the company. This will be done by increasing the accuracy with which Home Credit predicts loan default through the use of supervised, predictive classification models. Decision trees, random forests, neural networks, and more will be created to identify which customers have the highest probability of non-repayment. These models will be constructed based on the database Home Credit provided, using customer variables such as income, gender, age, employment nature, and more. A customer’s data will be run through the model created, at which point a prediction will be made of whether the client will be able to repay their loan. These predictions will then be compared to the true outcome of the customer’s loan (default or no default) for both a training and a testing subsection of the data. Doing so for all the observations in both sub-sectors will allow us to calculate the accuracy, precision, recall, and F1 score of each model. These key measures will be summarized through an AUC score that will be used to determine which performed the best, and if they performed better than the system Home Credit currently uses.
+ 
+ The target variable is TARGET, where 
+    0 = the client repaid the loan (no default)
+    1 = the client defaulted on the loan
+
+# Data preparation
+We started by loading in all of the provided data files from Home Credit into our R environment. From there, and based on our findings from our exploratory data analysis assignment, we decided to utilize some of the variables from the bureau dataset. However, in order to utilize these variables, we would need to first aggregate the data to achieve the same cross-sectional grain. Once this process was complete, we first cleaned the variable names using the clean_names method, which standardized all variable names to be lowercase. After that, we were able to join the aggregated bureau data with our training data on the SK_ID_CURR variable. This produced a dataset filtered down to include the following variables.
+
+AMT_INCOME_TOTAL – applicant’s total income (lower income often correlates with higher default).
+
+AMT_CREDIT – total credit amount requested (larger loans may increase risk if income is low).
+
+AMT_ANNUITY – loan annuity (installment amount due); higher installments relative to income signal risk.
+
+AMT_GOODS_PRICE – price of goods purchased; may proxy loan size.
+
+DAYS_BIRTH – age in days (younger borrowers often default more).
+
+DAYS_EMPLOYED – length of employment (shorter employment usually riskier).
+
+NAME_INCOME_TYPE – type of income (working, state servant, pensioner, student, etc. → some more stable than others).
+
+NAME_EDUCATION_TYPE – education level (often correlates with job stability/income).
+
+NAME_FAMILY_STATUS – marital status (married vs. single/widow, linked to repayment stability).
+
+NAME_HOUSING_TYPE – type of housing (own, rent, municipal → ownership often reduces risk).
+
+CNT_CHILDREN – number of children (more dependents increase financial pressure).
+
+REGION_RATING_CLIENT – external rating of client’s region (poorer regions may have higher risk).
+
+OCCUPATION_TYPE – type of occupation (some jobs are more stable).
+
+FLAG_OWN_REALTY – owns real estate (asset ownership reduces risk).
+
+FLAG_OWN_CAR – owns a car (proxy for wealth/assets).
+
+CNT_FAM_MEMBERS – number of family members (similar to dependents → more pressure).
+
+REGION_POPULATION_RELATIVE – population of the client’s region (urban vs rural differences).
+
+bureau_avg_days_credit - average number of days since the current application for Credit Bureau credit
+
+bureau_min_days_credit - minimum number of days since current application for Credit Bureau credit (both show how often a person is applying for new lines of credit, more recent correlated to higher risk)
+
+Once we had our filtered down data set of 19 out of the total 220 variables available across all datasets, we needed to perform some final transformations before constructing our models. Firstly, since only the train data had the TARGET variable included, we needed to subset the data into a further train and evaluation set using an 80% to 20% split. This is so that we could properly calculate our statistical measures of interest, such as AUC, using data that the model had not yet seen. Also, to deal with any null observations throughout the dataset, we decided to use a simple imputation process of replacing those null values with the mean value of the column as a whole. This was needed for the methods we used to build our models to run properly without dropping observations as a whole due to a single data point of a unit being left null.
+
+
+## Load libraries
+
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(data.table)
+library(pROC)
+library(janitor)
+library(skimr)
+library(naniar)
+library(caret)
+library(ggplot2)
+library(ggthemes)
+library(ranger)
+library(VennDiagram)
+library(rminer)
+
+```
+
+## Import data
+```{r}
+# Getting and setting the working directory
+current_wd <- getwd()
+setwd(current_wd)
+
+# Import all the data sets within the zip file given
+application_test <- read.csv(file = "application_test.csv", stringsAsFactors = FALSE)
+
+application_train <- read.csv(file = "application_train.csv", stringsAsFactors = FALSE)
+
+bureau_balance <- read.csv(file = "bureau_balance.csv", stringsAsFactors = FALSE)
+
+bureau <- read.csv(file = "bureau.csv", stringsAsFactors = FALSE)
+
+credit_card_balance <- read.csv(file = "credit_card_balance.csv", stringsAsFactors = FALSE)
+
+installments_payments <- read.csv(file = "installments_payments.csv", stringsAsFactors = FALSE)
+
+POS_CASH_balance <- read.csv(file = "POS_CASH_balance.csv", stringsAsFactors = FALSE)
+
+previous_application <- read.csv(file = "previous_application.csv", stringsAsFactors = FALSE)
+
+sample_submission <- read.csv(file = "sample_submission.csv", stringsAsFactors = FALSE)
+```
+
+## Setting up train and test setsperforming cross validation. Identifying majority class baseline
+```{r}
+# 
+# tr <- clean_names(application_train)
+# 
+# te <- clean_names(application_test)
+# 
+# # Inspect
+# head(tr)
+# 
+# # Target proportion
+# tr %>%
+#   count(target) %>%
+#   mutate(perc = n / sum(n))   # baseline class distribution
+```
+
+```{r Joining the application_train and application_test data with the bureau data}
+
+# Example aggregation on bureau
+# Need to aggregate to get the same grain of data (IE matching on the SK_ID_CURR variable)
+bureau_agg <- bureau %>%
+  group_by(SK_ID_CURR) %>%
+  summarise(
+    bureau_num_records = n(),                           # count of bureau records
+    bureau_avg_days_credit = mean(DAYS_CREDIT, na.rm = TRUE), # avg days since credit
+    bureau_min_days_credit = min(DAYS_CREDIT, na.rm = TRUE),  # min
+    bureau_max_days_credit = max(DAYS_CREDIT, na.rm = TRUE),  # max
+    bureau_avg_amt_credit_sum = mean(AMT_CREDIT_SUM, na.rm = TRUE) # avg outstanding credit
+  )
+
+# Join aggregated bureau data to applications
+application_train_joined <- application_train %>%
+  left_join(bureau_agg, by = "SK_ID_CURR")
+
+application_test_joined <- application_test %>%
+  left_join(bureau_agg, by = "SK_ID_CURR")
+
+```
+
+```{r Cleaning names after joins and filtering down to only certain variables}
+tr_joined <- clean_names(application_train_joined)
+
+tr_joined <- tr_joined %>%
+  select(
+    target,
+    amt_income_total,
+    amt_credit,
+    amt_annuity,
+    amt_goods_price,
+    days_birth,
+    days_employed,
+    name_income_type,
+    name_education_type,
+    name_family_status,
+    name_housing_type,
+    cnt_children,
+    region_rating_client,
+    occupation_type,
+    flag_own_realty,
+    flag_own_car,
+    cnt_fam_members,
+    region_population_relative,
+    bureau_avg_days_credit,
+    bureau_min_days_credit
+  ) %>%
+  mutate(across(where(is.character), as.factor))
+
+
+te_joined <- clean_names(application_test_joined)
+
+te_joined <- te_joined %>%
+  select(
+    sk_id_curr,
+    amt_income_total,
+    amt_credit,
+    amt_annuity,
+    amt_goods_price,
+    days_birth,
+    days_employed,
+    name_income_type,
+    name_education_type,
+    name_family_status,
+    name_housing_type,
+    cnt_children,
+    region_rating_client,
+    occupation_type,
+    flag_own_realty,
+    flag_own_car,
+    cnt_fam_members,
+    region_population_relative,
+    bureau_avg_days_credit,
+    bureau_min_days_credit
+  ) %>%
+  mutate(across(where(is.character), as.factor))
+```
+
+```{r Splitting the data set to be able to evaluate after}
+library(caret)
+set.seed(123)  # for reproducibility
+
+# Ensure target is a factor before splitting
+tr_joined$target <- as.factor(tr_joined$target)
+
+# Create stratified 80/20 split
+train_index <- createDataPartition(tr_joined$target, p = 0.8, list = FALSE)
+
+# Split into training and test/validation sets
+tr_train <- tr_joined[train_index, ]
+te_val   <- tr_joined[-train_index, ]
+
+# Dropping all NA's
+tr_train <- na.omit(tr_train)
+te_val <- na.omit(te_val)
+
+
+# Check sizes
+nrow(tr_train)
+nrow(te_val)
+prop.table(table(tr_train$target))
+prop.table(table(te_val$target))
+
+```
+
+```{r Baseline AUC model}
+# Logistic regression: intercept only
+model1 <- glm(target ~ 1, data = tr_train, family = binomial)
+summary(model1)
+```
+# Modeling
+
+## Fitting logistic regression first model with defferent predictors. 
+
+```{r}
+# AUC baseline
+auc1 <- roc(response = tr_train$target,
+            predictor = predict(model1, type = "response"))
+plot(auc1)
+```
+
+
+
+
+## Logistic regression with predictors
+```{r}
+
+log_model <- glm(target ~ .,
+              data = tr_train, family = binomial)
+summary(log_model)    
+```
+
+## Logistic Regression model performance
+```{r}
+# Predict probabilities for the positive class
+pred_probs <- predict(log_model, newdata = te_val, type = "response")
+
+# Compute and plot AUC
+log_auc <- roc(response = te_val$target, predictor = pred_probs)
+plot(log_auc, main = paste("AUC =", round(log_auc$auc, 3)))
+log_auc$auc
+
+
+# Confusion matrix and performance metrics
+pred_probs_df <- as.data.frame(pred_probs)
+# Convert probabilities to predicted class
+threshold <- .5
+
+target_levels <- levels(te_val$target)
+pred_class <- factor(
+  ifelse(pred_probs_df > threshold,
+         target_levels[2],
+         target_levels[1]),
+  levels = target_levels
+)
+
+cm <- confusionMatrix(data = pred_class,
+                      reference = te_val$target,
+                      positive = target_levels[2])
+
+print(cm)
+```
+This logistic regression model is not good, it's essentially a majority classifier. With a threshold probability of .5, every instance was recorded as a no default. Decreasing the threshold probability was not able to get the sensitivity to a good level without a great sacrifice to accuracy. 
+
+## Random Forest with downsampling and 5-fold cross-validation
+```{r}
+# Random forest (caret)
+caret_mod <- train(factor(ifelse(target == 0, "no_default", "default")) ~ .,
+                   method = "ranger",   # fast RF
+                   trControl = trainControl(method = "cv",
+                                            number = 5,
+                                            classProbs = TRUE,
+                                            summaryFunction = twoClassSummary,
+                                            sampling = "down"),
+                   metric = "ROC",
+                   data = tr_train)
+caret_mod
+```
+
+
+## Random Forest Model performance
+```{r}
+# auc_val <- roc(response = te_val$target,
+#                predictor = predict(model2, newdata = te_val, type = "response"))
+# plot(auc_val)
+# auc_val$auc
+
+library(caret)
+library(pROC)
+
+# Ensure factor levels match training
+# te_val$target <- factor(ifelse(te_val$target == 0, "no_default", "default"))
+
+# Check that both classes exist
+table(te_val$target)
+
+# Predict probabilities
+pred_probs_caret <- predict(caret_mod, newdata = te_val, type = "prob")
+pred_positive_caret <- pred_probs_caret[, "default"]
+
+# Compute AUC
+auc_caret_mod <- roc(response = te_val$target,
+                     predictor = pred_positive_caret,
+                     levels = target_levels,
+                     direction = "<")
+plot(auc_caret_mod, main = paste("AUC =", round(auc_caret_mod$auc, 3)))
+auc_caret_mod$auc
+
+
+
+```
+```{r, confusion matrix}
+# Confusion matrix and performance metrics
+
+# Convert probabilities to predicted class
+threshold <- .5
+
+pred_class_caret <- factor(
+  ifelse(pred_positive_caret > threshold,
+         target_levels[2],
+         target_levels[1]),
+  levels = target_levels
+)
+
+# Generate and print confusion matrix
+cm <- confusionMatrix(data = pred_class_caret,
+                      reference = te_val$target,
+                      positive = target_levels[2])
+
+print(cm)
+
+mmetric(pred_class, te_val$target, metric = "ALL")
+
+```
+While the overall accuracy of this model is lacking, it has a much greater sensitivity (.63) than any other models. This is especially important with our customer's purpose of avoiding giving credit to people who are likely to default. 
+
+
+
+## Neural Network Models
+```{r RWeka setup for MLPs}
+
+# Load the following packages. Install them first if necessary.
+library(caret)
+library(RWeka)
+library(kernlab)
+library(rminer)
+library(matrixStats)
+library(knitr)
+
+
+
+# Have these ones as well just incase
+library(psych)
+library(rpart)
+library(rpart.plot)
+library(rJava)
+library(tictoc) 
+library(tidyverse)
+library(dplyr)
+
+MLP <- make_Weka_classifier("weka/classifiers/functions/MultilayerPerceptron")
+```
+
+### Training with default values on downsampled dataset
+```{r Starting with a default setting neural network on a downsampled dataset}
+# # Convert target to factor
+# tr_train$target <- as.factor(tr_train$target)
+# # te_val$target  <- as.factor(te_val$target)
+
+set.seed(123)  # for reproducibility
+tr_small <- tr_train %>%
+  dplyr::sample_frac(0.1)   # keeps 10% of rows
+
+
+l <- 0.3
+m <- 0.2
+n <- 500
+h <- 't,t'
+
+# This MLP call creates the same model using default values
+
+MLP_small1 <- MLP(target ~ ., data = tr_small, control = Weka_control(L=l, M=m, N=n, H=h))
+```
+
+### Model 1 performance
+```{r}
+# Compute AUC
+# Predict probabilities for the positive class ("1")
+pred_probs <- predict(MLP_small1, newdata = te_val, type = "probability")
+
+# Check column names to confirm positive class
+colnames(pred_probs)
+# Usually the positive class is "1"
+pred_positive <- pred_probs[, "1"]
+
+# Compute and plot AUC
+auc_val <- roc(response = te_val$target, predictor = pred_positive)
+plot(auc_val, main = paste("AUC =", round(auc_val$auc, 3)))
+auc_val$auc
+
+
+```
+
+```{r}
+# Confusion matrix and performance metrics
+
+# Convert probabilities to predicted class
+threshold <- .5
+
+pred_class <- factor(
+  ifelse(pred_probs[,"1"] > threshold,
+         target_levels[2],
+         target_levels[1]),
+  levels = target_levels
+)
+
+cm <- confusionMatrix(data = pred_class,
+                      reference = te_val$target,
+                      positive = target_levels[2])
+
+print(cm)
+
+```
+
+Not particularly great, takes a long time and still misses the vast majority of the defaulted loans, which is our target of interest. We have changed the hyperparameters and run a new model below.
+
+### Changing hyperparameters for new model, still using downsampled dataset
+```{r}
+l <- 0.5
+m <- 0.2
+n <-1000
+h <- 't,t'
+
+# This MLP call creates the same model using default values
+
+MLP_small2 <- MLP(target ~ ., data = tr_small, control = Weka_control(L=l, M=m, N=n, H=h))
+
+```
+
+### New model performance
+```{r}
+# Compute AUC
+# Predict probabilities for the positive class ("1")
+pred_probs <- predict(MLP_small2, newdata = te_val, type = "probability")
+
+# Check column names to confirm positive class
+colnames(pred_probs)
+# Usually the positive class is "1"
+pred_positive <- pred_probs[, "1"]
+
+# Compute and plot AUC
+auc_val <- roc(response = te_val$target, predictor = pred_positive)
+plot(auc_val, main = paste("AUC =", round(auc_val$auc, 3)))
+auc_val$auc
+
+
+```
+
+```{r}
+# Confusion matrix and performance metrics
+
+# Convert probabilities to predicted class
+threshold <- .5
+
+pred_class <- factor(
+  ifelse(pred_probs[,"1"] > threshold,
+         target_levels[2],
+         target_levels[1]),
+  levels = target_levels
+)
+
+cm <- confusionMatrix(data = pred_class,
+                      reference = te_val$target,
+                      positive = target_levels[2])
+
+print(cm)
+
+```
+
+Still does not perform well, but slightly better at picking up the positive class. However, it takes much longer. Because our data is so unbalanced, I will add a column for weights and weight our default instances much higher and see if we can turn this model into something the customer can use. So far, the random forest is far better at predicting defaults with sensitivity.
+
+### Neural Network model with weighting based on class
+```{r adding weight column to use in a weighted neural network model}
+# add a weight column based on the target variable
+tr_small_weighted <- tr_small |>
+  mutate(weight = ifelse(target == 1, 11.25, 1))
+
+weight <- tr_small_weighted$weight
+
+# run new neural network model with weight column
+# install.packages("nnet")
+library(nnet)
+
+# Fit the nnet model, passing the weights directly
+nnet_weighted_model <- nnet(
+    formula = target ~ .,
+    data = tr_small,
+    weights = weight,
+    size = 10,  
+    maxit = 1000 
+)
+```
+
+### Weighted Neural Network model performance
+```{r}
+# Compute AUC
+# Predict probabilities for the positive class ("1")
+pred_probs_weighted <- predict(nnet_weighted_model, newdata = te_val, type = "raw")
+
+# Check column names to confirm positive class
+colnames(pred_probs_weighted)
+# Usually the positive class is "1"
+pred_positive = pred_probs_weighted[,1]
+
+# Compute and plot AUC
+auc_val <- roc(response = te_val$target, predictor = pred_positive)
+plot(auc_val, main = paste("AUC =", round(auc_val$auc, 3)))
+auc_val$auc
+
+```
+
+```{r}
+# Confusion matrix and performance metrics
+
+# Convert probabilities to predicted class
+threshold <- .5
+
+pred_class <- factor(
+  ifelse(pred_positive > threshold,
+         target_levels[2],
+         target_levels[1]),
+  levels = target_levels
+)
+
+cm <- confusionMatrix(data = pred_class,
+                      reference = te_val$target,
+                      positive = target_levels[2])
+
+print(cm)
+
+```
+
+Unfortunately, this is still not a good model, we tried multiple weights (10, 11, 12, 15, 20, finally 11.5) and any model that had anything approaching a decent sensitivity threw accuracy out the window. It did, however, compile much more quickly than the previous neural network models.
+
+### Neural network model using full dataset and default hyperparameters
+
+```{r Starting with a default setting neural network on the full joined dataset}
+
+set.seed(123)  # for reproducibility
+
+l <- 0.3
+m <- 0.2
+n <-500
+h <- 'a'
+
+# This MLP call creates the same model using default values
+
+MLP_default <- MLP(target ~ ., data = tr_train, control = Weka_control(L=l, M=m, N=n, H=h))
+```
+
+### Full dataset neural network model performance
+```{r}
+# Compute AUC
+# Predict probabilities for the positive class ("1")
+pred_probs <- predict(MLP_default, newdata = te_val, type = "probability")
+
+# Check column names to confirm positive class
+colnames(pred_probs)
+# Usually the positive class is "1"
+pred_positive <- pred_probs[, "1"]
+
+# Compute and plot AUC
+auc_val <- roc(response = te_val$target, predictor = pred_positive)
+plot(auc_val, main = paste("AUC =", round(auc_val$auc, 3)))
+auc_val$auc
+```
+```{r}
+
+# Confusion matrix and performance metrics
+
+# Convert probabilities to predicted class
+threshold <- .5
+
+pred_class <- factor(
+  ifelse(pred_probs[,"1"] > threshold,
+         target_levels[2],
+         target_levels[1]),
+  levels = target_levels
+)
+
+cm <- confusionMatrix(data = pred_class,
+                      reference = te_val$target,
+                      positive = target_levels[2])
+
+print(cm)
+
+```
+By AUC alone, this is one of our better models. However, the sensitivity is still far too low for our purposes. Additionally the model takes a very long time to train, making it very difficult to recommend over the random forest model. 
+
+
+## Create Kaggle Submission/Kaggle Evaluation
+```{r, eval=FALSE}
+#  Kaggle-style submission
+
+# Replace NAs with means of the data in training set, all columns that we are using with NAs are numerical
+
+# Calculate mean for each numerical column in our training data, store in list
+train_means <- tr_train |>
+  summarise(across(where(is.numeric), ~ mean(.x, na.rm = TRUE)))
+
+# Impute these means into the test data where there are NAs
+te_joined_imputed <- te_joined
+
+for(col in names(train_means)){
+  # Make sure column exists in the test data
+  if(col %in% names(te_joined_imputed)){
+    # anywhere there is an na, we replace it with the column mean
+    te_joined_imputed[[col]][is.na(te_joined_imputed[[col]])] <- train_means[[col]]
+  }
+}
+
+# predict on test data using our random forest model
+
+pred_probs_test <- predict(caret_mod, newdata = te_joined_imputed[,-1], type = "prob")
+
+submission <- te_joined_imputed %>%
+  mutate( TARGET = pred_probs_test[,1],
+          SK_ID_CURR = sk_id_curr) %>%
+  select(SK_ID_CURR, TARGET)
+head(submission)
+
+# Write our submission to CSV for submission
+write.csv(x = submission,
+          file = "submission.csv",
+          row.names = FALSE)
+```
+
+
+For our Kaggle submission, we will use the random forest model. Our model received a private score of .67520 and a public score of .66232. Not great, but not the worst either. 
+
+# Results
+## Key Takeaways
+- Random Forest provided the best model for our client's unique needs. They need to limit the risk of default, and the random forest model had the best sensitivity without sacrificing accuracy. This is what we ended up submitting to Kaggle
+- Hyperparameters make a big difference. This was especially noticeable in the neural net models, where hyperparameter selection influenced not only performance of the model, but also make huge differences in how long the model takes to train. The way we trained the random forest also included hyperparameter tuning, but it performed the tuning itself during the cross validation. This is a big reason why it performed well compared to others.
+- Unbalanced data can make model tuning difficult. Many of our "best performing" models based strictly on accuracy and AUC were just majority classifiers when the threshold for predicting default was a probability of .5.
+## Future improvements
+- Better data selection. We can select variables better. Some of our models ended up using variables that do not have a statistically significant relationship with the target variable.
+- Variable interaction. The best models on Kaggle did a great deal of variable creation, modeling relationships between variables. This helped them achieve model performance that is greater than is possible by changing hyperparameters alone.
+- Change our handling of NAs in training data. Our models might improve if we change our NA treatment to imputation by mean/mode.
+
+# Group members and their contribution
+## Astha
+Built the logistic regression and random forest models used in the notebook, as well as made the structure for AUC evaluation of the models.
+## Jordan
+Provided the commentary in the modeling section, did hyperparameter tuning for the MLP models, got submission ready for Kaggle and submitted, created and summarized the non-AUC performance metrics of each model, wrote the 'Results' section and cleaned up for final submission.
+## Max
+I built the MLP models seen in the notebook, as well as edited the overall structure of the code to be consistent as one cohesive notebook. I was also the main writer for the ‘Introduction’ and ‘Data Preparation’ sections.
