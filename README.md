@@ -141,25 +141,16 @@ Given more time, I would:
 
 ---
 
-## Key Interview Talking Points
 
-**Walk me through your approach to this project.**
+**Walking through the approach to this project.**
 
 Started with business understanding—Home Credit needs to detect defaults while maintaining financial inclusion. Built baseline logistic regression (0% sensitivity due to imbalance), then Random Forest with downsampling (63% sensitivity). Tested neural networks extensively but they didn't justify the computational cost. Selected Random Forest for best sensitivity and practical deployment.
 
-**How did you handle the class imbalance?**
-
 Tried three approaches: downsampling (balanced training data), class weighting (weighted defaults 11.25x), and threshold tuning. Downsampling in Random Forest worked best, achieving 63% sensitivity vs. 34% with class weighting in neural nets.
-
-**Why didn't neural networks perform better?**
 
 With tabular data and limited feature engineering, tree-based methods often outperform deep learning. Also, training time was prohibitive (45+ minutes vs. 15 for Random Forest), and sensitivity remained poor despite extensive hyperparameter tuning.
 
-**What would you improve with more time?**
-
 Three priorities: (1) Feature engineering—create interaction terms and ratios, (2) Use all 7 data tables instead of just 2, (3) Ensemble multiple models like top Kaggle solutions. Could likely reach 0.75-0.80 AUC with these improvements.
-
-**How does this translate to business value?**
 
 If Home Credit processes 10,000 loans/month with 8% default rate, that's 800 defaults. Our model catches 504 of them (63%), preventing significant losses. Trade-off is flagging 1,633 good applicants for manual review, but cost of defaults far exceeds review costs.
 
