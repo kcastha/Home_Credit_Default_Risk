@@ -1,6 +1,6 @@
 ---
 title: "Modelling_Assignment"
-author: "Astha K C, Max R, Jordan S"
+author: "Astha K C"
 date: "2025-10-26"
 output: html_document
 ---
@@ -672,10 +672,5 @@ For our Kaggle submission, we will use the random forest model. Our model receiv
 - Variable interaction. The best models on Kaggle did a great deal of variable creation, modeling relationships between variables. This helped them achieve model performance that is greater than is possible by changing hyperparameters alone.
 - Change our handling of NAs in training data. Our models might improve if we change our NA treatment to imputation by mean/mode.
 
-# Group members and their contribution
-## Astha
-Built the logistic regression and random forest models used in the notebook, as well as made the structure for AUC evaluation of the models.
-## Jordan
-Provided the commentary in the modeling section, did hyperparameter tuning for the MLP models, got submission ready for Kaggle and submitted, created and summarized the non-AUC performance metrics of each model, wrote the 'Results' section and cleaned up for final submission.
-## Max
-I built the MLP models seen in the notebook, as well as edited the overall structure of the code to be consistent as one cohesive notebook. I was also the main writer for the ‘Introduction’ and ‘Data Preparation’ sections.
+
+
