@@ -1,0 +1,8 @@
+# Data files
+*.csv
+data/
+
+# R files
+.Rhistory
+.RData
+.Rproj.user/
